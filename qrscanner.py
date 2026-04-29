@@ -1,6 +1,6 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox
-from PIL import Image, ImageTk, ImageGrab
+from PIL import Image, ImageTk, ImageGrab, ImageEnhance
 from pyzbar.pyzbar import decode
 import os
 
@@ -66,17 +66,44 @@ class QRScannerApp:
     def process_image(self, pil_img):
         self.display_image(pil_img.copy())
         
-        # Decode
+        self.text_result.delete("1.0", tk.END)
+        self.text_result.insert(tk.END, "Scanning...")
+        self.root.update()
+        
+        # Ensure we start with RGB
+        if pil_img.mode != 'RGB':
+            pil_img = pil_img.convert('RGB')
+            
+        decoded_objects = []
+        
+        # Helper to yield multiple image variations to improve recognition 
+        def get_variations(img):
+            yield img
+            gray = img.convert('L')
+            yield gray
+            yield ImageEnhance.Contrast(gray).enhance(2.0)
+            yield ImageEnhance.Sharpness(gray).enhance(2.0)
+            
+            w, h = img.size
+            yield gray.resize((w * 2, h * 2), Image.Resampling.LANCZOS)
+            yield gray.resize((int(w * 2.5), int(h * 2.5)), Image.Resampling.LANCZOS)
+            
+            if w > 800 or h > 800:
+                yield gray.resize((w // 2, h // 2), Image.Resampling.LANCZOS)
+                yield gray.resize((w // 3, h // 3), Image.Resampling.LANCZOS)
+                
+            yield gray.point(lambda x: 0 if x < 128 else 255, '1')
+
         try:
-            # We convert to RGB to ensure pyzbar handles it well
-            if pil_img.mode != 'RGB':
-                pil_img = pil_img.convert('RGB')
-            decoded_objects = decode(pil_img)
+            for variation in get_variations(pil_img):
+                decoded_objects = decode(variation)
+                if decoded_objects:
+                    break # Found something!
         except Exception as e:
             self.text_result.delete("1.0", tk.END)
             self.text_result.insert(tk.END, f"Error decoding image: {e}")
             return
-        
+            
         self.text_result.delete("1.0", tk.END)
         
         if not decoded_objects:
@@ -84,10 +111,13 @@ class QRScannerApp:
             return
             
         results = []
+        seen = set()
         for obj in decoded_objects:
             data = obj.data.decode('utf-8')
-            code_type = obj.type
-            results.append(f"[{code_type}] {data}")
+            if data not in seen:
+                seen.add(data)
+                code_type = obj.type
+                results.append(f"[{code_type}] {data}")
             
         self.text_result.insert(tk.END, "\n".join(results))
         
