@@ -86,8 +86,9 @@ class QRScannerApp:
             yield ImageEnhance.Sharpness(gray).enhance(2.0)
             
             w, h = img.size
-            yield gray.resize((w * 2, h * 2), Image.Resampling.LANCZOS)
-            yield gray.resize((int(w * 2.5), int(h * 2.5)), Image.Resampling.LANCZOS)
+            if w < 500 and h < 500:
+                yield gray.resize((w * 2, h * 2), Image.Resampling.LANCZOS)
+                yield gray.resize((int(w * 2.5), int(h * 2.5)), Image.Resampling.LANCZOS)
             
             if w > 800 or h > 800:
                 yield gray.resize((w // 2, h // 2), Image.Resampling.LANCZOS)
@@ -99,15 +100,21 @@ class QRScannerApp:
             for variation in get_variations(pil_img):
                 decoded_objects = list(decode(variation))
                 
+                if decoded_objects:
+                    break
+                
                 # Try Data Matrix decoding as well
                 try:
-                    dmtx_objects = dmtx_decode(variation)
-                    decoded_objects.extend(dmtx_objects)
+                    try:
+                        dmtx_objects = dmtx_decode(variation, timeout=500)
+                    except TypeError:
+                        dmtx_objects = dmtx_decode(variation)
+                        
+                    if dmtx_objects:
+                        decoded_objects.extend(dmtx_objects)
+                        break
                 except Exception as ex:
                     pass
-                
-                if decoded_objects:
-                    break # Found something!
         except Exception as e:
             self.text_result.delete("1.0", tk.END)
             self.text_result.insert(tk.END, f"Error decoding image: {e}")
