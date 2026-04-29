@@ -4,6 +4,70 @@ from PIL import Image, ImageTk, ImageGrab, ImageEnhance
 from pyzbar.pyzbar import decode
 from pylibdmtx.pylibdmtx import decode as dmtx_decode
 import os
+import argparse
+import sys
+
+def scan_image(pil_img):
+    # Ensure we start with RGB
+    if pil_img.mode != 'RGB':
+        pil_img = pil_img.convert('RGB')
+        
+    decoded_objects = []
+    
+    # Helper to yield multiple image variations to improve recognition 
+    def get_variations(img):
+        yield img
+        gray = img.convert('L')
+        yield gray
+        yield ImageEnhance.Contrast(gray).enhance(2.0)
+        yield ImageEnhance.Sharpness(gray).enhance(2.0)
+        
+        w, h = img.size
+        if w < 500 and h < 500:
+            yield gray.resize((w * 2, h * 2), Image.Resampling.LANCZOS)
+            yield gray.resize((int(w * 2.5), int(h * 2.5)), Image.Resampling.LANCZOS)
+        
+        if w > 800 or h > 800:
+            yield gray.resize((w // 2, h // 2), Image.Resampling.LANCZOS)
+            yield gray.resize((w // 3, h // 3), Image.Resampling.LANCZOS)
+            
+        yield gray.point(lambda x: 0 if x < 128 else 255, '1')
+
+    try:
+        for variation in get_variations(pil_img):
+            decoded_objects = list(decode(variation))
+            
+            if decoded_objects:
+                break
+            
+            # Try Data Matrix decoding as well
+            try:
+                try:
+                    dmtx_objects = dmtx_decode(variation, timeout=500)
+                except TypeError:
+                    dmtx_objects = dmtx_decode(variation)
+                    
+                if dmtx_objects:
+                    decoded_objects.extend(dmtx_objects)
+                    break
+            except Exception as ex:
+                pass
+    except Exception as e:
+        return [f"Error decoding image: {e}"]
+        
+    if not decoded_objects:
+        return ["No QR code or barcode found."]
+        
+    results = []
+    seen = set()
+    for obj in decoded_objects:
+        data = obj.data.decode('utf-8')
+        if data not in seen:
+            seen.add(data)
+            code_type = getattr(obj, 'type', 'Data Matrix')
+            results.append(f"[{code_type}] {data}")
+        
+    return results
 
 class QRScannerApp:
     def __init__(self, root):
@@ -71,70 +135,9 @@ class QRScannerApp:
         self.text_result.insert(tk.END, "Scanning...")
         self.root.update()
         
-        # Ensure we start with RGB
-        if pil_img.mode != 'RGB':
-            pil_img = pil_img.convert('RGB')
-            
-        decoded_objects = []
-        
-        # Helper to yield multiple image variations to improve recognition 
-        def get_variations(img):
-            yield img
-            gray = img.convert('L')
-            yield gray
-            yield ImageEnhance.Contrast(gray).enhance(2.0)
-            yield ImageEnhance.Sharpness(gray).enhance(2.0)
-            
-            w, h = img.size
-            if w < 500 and h < 500:
-                yield gray.resize((w * 2, h * 2), Image.Resampling.LANCZOS)
-                yield gray.resize((int(w * 2.5), int(h * 2.5)), Image.Resampling.LANCZOS)
-            
-            if w > 800 or h > 800:
-                yield gray.resize((w // 2, h // 2), Image.Resampling.LANCZOS)
-                yield gray.resize((w // 3, h // 3), Image.Resampling.LANCZOS)
-                
-            yield gray.point(lambda x: 0 if x < 128 else 255, '1')
-
-        try:
-            for variation in get_variations(pil_img):
-                decoded_objects = list(decode(variation))
-                
-                if decoded_objects:
-                    break
-                
-                # Try Data Matrix decoding as well
-                try:
-                    try:
-                        dmtx_objects = dmtx_decode(variation, timeout=500)
-                    except TypeError:
-                        dmtx_objects = dmtx_decode(variation)
-                        
-                    if dmtx_objects:
-                        decoded_objects.extend(dmtx_objects)
-                        break
-                except Exception as ex:
-                    pass
-        except Exception as e:
-            self.text_result.delete("1.0", tk.END)
-            self.text_result.insert(tk.END, f"Error decoding image: {e}")
-            return
+        results = scan_image(pil_img)
             
         self.text_result.delete("1.0", tk.END)
-        
-        if not decoded_objects:
-            self.text_result.insert(tk.END, "No QR code or barcode found.")
-            return
-            
-        results = []
-        seen = set()
-        for obj in decoded_objects:
-            data = obj.data.decode('utf-8')
-            if data not in seen:
-                seen.add(data)
-                code_type = getattr(obj, 'type', 'Data Matrix')
-                results.append(f"[{code_type}] {data}")
-            
         self.text_result.insert(tk.END, "\n".join(results))
         
     def open_image(self):
@@ -179,7 +182,32 @@ class QRScannerApp:
             self.root.update() # Keep it on clipboard
             messagebox.showinfo("Copied", "Text copied to clipboard.")
 
+def main():
+    parser = argparse.ArgumentParser(description="QR & Barcode Scanner")
+    parser.add_argument("image_path", nargs="?", help="Path to an image file to scan. If omitted, launches the GUI.")
+    args = parser.parse_args()
+
+    if args.image_path:
+        # CLI Mode
+        if not os.path.exists(args.image_path):
+            print(f"Error: File not found: {args.image_path}")
+            sys.exit(1)
+            
+        try:
+            img = Image.open(args.image_path)
+        except Exception as e:
+            print(f"Error: Failed to open image: {e}")
+            sys.exit(1)
+            
+        print(f"Scanning {args.image_path}...")
+        results = scan_image(img)
+        for res in results:
+            print(res)
+    else:
+        # GUI Mode
+        root = tk.Tk()
+        app = QRScannerApp(root)
+        root.mainloop()
+
 if __name__ == "__main__":
-    root = tk.Tk()
-    app = QRScannerApp(root)
-    root.mainloop()
+    main()

@@ -8,7 +8,7 @@ if not exist qrenv\Scripts\activate.bat call :init_env || ( echo error installin
 call qrenv\Scripts\activate.bat
 
 :: Run the application
-python qrscanner.py
+python qrscanner.py %*
 
 goto :eof
 
