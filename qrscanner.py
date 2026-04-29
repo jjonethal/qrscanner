@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 from PIL import Image, ImageTk, ImageGrab, ImageEnhance
 from pyzbar.pyzbar import decode
+from pylibdmtx.pylibdmtx import decode as dmtx_decode
 import os
 
 class QRScannerApp:
@@ -96,7 +97,15 @@ class QRScannerApp:
 
         try:
             for variation in get_variations(pil_img):
-                decoded_objects = decode(variation)
+                decoded_objects = list(decode(variation))
+                
+                # Try Data Matrix decoding as well
+                try:
+                    dmtx_objects = dmtx_decode(variation)
+                    decoded_objects.extend(dmtx_objects)
+                except Exception as ex:
+                    pass
+                
                 if decoded_objects:
                     break # Found something!
         except Exception as e:
@@ -116,7 +125,7 @@ class QRScannerApp:
             data = obj.data.decode('utf-8')
             if data not in seen:
                 seen.add(data)
-                code_type = obj.type
+                code_type = getattr(obj, 'type', 'Data Matrix')
                 results.append(f"[{code_type}] {data}")
             
         self.text_result.insert(tk.END, "\n".join(results))

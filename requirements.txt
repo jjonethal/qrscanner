@@ -1,2 +1,4 @@
 Pillow
 pyzbar
+pylibdmtx
+setuptools
